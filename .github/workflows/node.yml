@@ -2,12 +2,16 @@ name: Scheduled Job
 
 on:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
   
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      AP_ACCESS_TOKEN: ${{ secrets.AP_ACCESS_TOKEN }}
+      AP_URL: ${{ secrets.AP_URL }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v2
