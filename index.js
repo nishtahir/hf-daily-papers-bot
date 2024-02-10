@@ -1,34 +1,11 @@
-import "dotenv/config";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import * as crypto from "crypto";
+import 'dotenv/config';
+import { postStatus, uploadMedia, fetchRecentPosts } from './activity-pub.js';
+import { summarizePaper, captionImage } from './gemini.js';
+import { fetchDailyPapers } from './hugging-face.js';
 
-const AP_ACCESS_TOKEN = process.env.AP_ACCESS_TOKEN;
-const AP_URL = process.env.AP_URL;
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY);
-const promptTemplate = `Summarize this as a tweet including relevant hashtags
----
-{%abstract%}
-`;
-
-const postTemplate = `{%summary%}
+const POST_TEMPLATE = `{%summary%}
 {%url%}
 `;
-
-function createDailyPapersUrl(today = new Date()) {
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
-  const day = today.getDate();
-
-  return `https://huggingface.co/api/daily_papers?date=${year}-${month}-${day}`;
-}
-
-async function summarizePaper(content) {
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-  const prompt = promptTemplate.replace("{%abstract%}", content);
-  const result = await model.generateContent(prompt);
-  return result.response.text();
-}
 
 async function downloadMedia(url) {
   const response = await fetch(url);
@@ -36,125 +13,81 @@ async function downloadMedia(url) {
   return imageBuffer;
 }
 
-async function uploadMedia(fileBuffer, mimeType) {
-  const form = new FormData();
-  form.append("file", new Blob([fileBuffer]), {
-    filename: crypto.randomBytes(16).toString("hex"),
-    contentType: mimeType,
-  });
-
-  const response = await fetch(`${AP_URL}/api/v1/media`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${AP_ACCESS_TOKEN}`,
-    },
-    body: form,
-  });
-
-  const mediaData = await response.json();
-  return mediaData.id;
-}
-
-async function postStatus({ summary, url, attachments }) {
-  const postBody = postTemplate
-    .replace("{%summary%}", summary)
-    .replace("{%url%}", url);
-
-  const postData = new FormData();
-  postData.append("status", postBody);
-
-  for (const attachment of attachments) {
-    postData.append("media_ids[]", attachment);
-  }
-
-  await fetch(`${AP_URL}/api/v1/statuses`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${AP_ACCESS_TOKEN}`,
-    },
-    body: postData,
-  });
-}
-
 function parseMimeType(url) {
-  if (url.endsWith(".png")) {
-    return "image/png";
-  } else if (url.endsWith(".jpg") || url.endsWith("jpeg")) {
-    return "image/jpeg";
-  } else if (url.endsWith(".gif")) {
-    return "image/gif";
-  } else if (url.endsWith(".mp4")) {
-    return "video/mp4";
+  // get the file extension
+  const fileExtension = url.split('.').pop();
+  if (!fileExtension) {
+    return null;
+  }
+
+  switch (fileExtension) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'mp4':
+      return 'video/mp4';
+    default:
+      return null;
   }
 }
 
-async function fetchRecentPosts(limit = 30) {
-  const verifyResponse = await fetch(
-    `${AP_URL}/api/v1/accounts/verify_credentials`,
-    {
-      headers: {
-        Authorization: `Bearer ${AP_ACCESS_TOKEN}`,
-      },
-    }
-  );
-  const userData = await verifyResponse.json();
+function mimeTypeIsImage(mimeType) {
+  return mimeType.startsWith('image/');
+}
 
-  const postsResponse = await fetch(
-    `${AP_URL}/api/v1/accounts/${userData.id}/statuses?limit=${limit}`,
-    {
-      headers: {
-        Authorization: `Bearer ${AP_ACCESS_TOKEN}`,
-      },
+async function handleMedia(mediaUrl) {
+  const mediaIds = [];
+  const mimeType = parseMimeType(mediaUrl);
+  if (mimeType) {
+    const buffer = await downloadMedia(mediaUrl);
+    let caption = null;
+    if (mimeTypeIsImage(mimeType)) {
+      caption = await captionImage(buffer, mimeType);
     }
-  );
-  return await postsResponse.json();
+    const mediaId = await uploadMedia({ buffer, mimeType, description: caption });
+    mediaIds.push(mediaId);
+  }
+  return mediaIds;
+}
+
+async function fetchNewPapers() {
+  const items = await fetchDailyPapers();
+  const recentPosts = await fetchRecentPosts();
+  // We only want to post papers that haven't been posted before
+  // We can check this by checking to see if the paper URL appears in any of the recent posts
+  const recentPostsContent = recentPosts.map((post) => post.text).join(' ');
+  return items.filter((item) => !recentPostsContent.includes(item.paperUrl));
 }
 
 async function main() {
-  const recentPosts = await fetchRecentPosts();
-  const recentPostsContent = recentPosts.map((post) => post.text);
-  const url = createDailyPapersUrl();
-  console.log(`Fetching papers for ${url}`);
+  /* eslint-disable no-await-in-loop, no-console */
+  const date = new Date();
+  console.log(`Fetching papers for ${date.toISOString()}...`);
 
-  const response = await fetch(url);
-  const items = await response.json();
-  console.log(`Found ${items.length} papers...`);
+  const papers = await fetchNewPapers(date);
+  console.log(`Found ${papers.length} new papers...`);
 
-  for (const item of items) {
-    const paper = item.paper;
-    if (!paper) {
-      console.log(`No paper found for ${JSON.stringify(item)}`);
-      continue;
-    }
+  for (let i = 0; i < papers.length; i += 1) {
+    const { paper, paperUrl, mediaUrl } = papers[i];
+    console.log(`${i + 1} of ${papers.length}: Creating post for ${paperUrl}...`);
 
-    const paperUrl = `https://huggingface.co/papers/${paper.id}`;
-    const existingPostForPaper = recentPostsContent.find((content) =>
-      content.includes(paperUrl)
-    );
-    if (existingPostForPaper) {
-      console.log(`Skipping ${paper.id} as a recent dupe`);
-      continue;
-    }
-    console.log(`Generating post for ${paperUrl}`);
+    console.log('Uploading media...');
+    const mediaIds = await handleMedia(mediaUrl);
 
-    const mediaIds = [];
-    const mediaUrl = item.mediaUrl;
+    console.log('Summarizing paper...');
+    const summary = await summarizePaper(paper.summary);
 
-    if (mediaUrl) {
-      const mimeType = parseMimeType(mediaUrl);
-      if (mimeType) {
-        const buffer = await downloadMedia(item.mediaUrl);
-        const mediaId = await uploadMedia(buffer, mimeType);
-        mediaIds.push(mediaId);
-      }
-    }
+    const postBody = POST_TEMPLATE
+      .replace('{%summary%}', summary)
+      .replace('{%url%}', paperUrl);
 
-    const summary = await summarizePaper(paper.title);
-    postStatus({
-      summary,
-      url: paperUrl,
-      attachments: mediaIds,
-    });
+    console.log('Posting status...');
+    postStatus({ status: postBody, attachments: mediaIds });
+    /* eslint-enable no-await-in-loop, no-console */
   }
 }
 
