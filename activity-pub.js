@@ -72,7 +72,7 @@ export async function postStatus({
     postData.append('media_ids[]', attachments[i]);
   }
 
-  await fetch(`${baseUrl}/api/v1/statuses`, {
+  return fetch(`${baseUrl}/api/v1/statuses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,

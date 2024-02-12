@@ -86,7 +86,8 @@ async function main() {
       .replace('{%url%}', paperUrl);
 
     console.log('Posting status...');
-    postStatus({ status: postBody, attachments: mediaIds });
+    const res = await postStatus({ status: postBody, attachments: mediaIds });
+    console.log(`Status: ${res.status} ${res.statusText}`);
     /* eslint-enable no-await-in-loop, no-console */
   }
 }
