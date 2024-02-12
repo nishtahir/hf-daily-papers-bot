@@ -62,7 +62,7 @@ export async function postStatus({
   accessToken = AP_ACCESS_TOKEN,
   status,
   attachments,
-  visibility = 'unlisted',
+  visibility = 'public',
 }) {
   const postData = new FormData();
   postData.append('status', status);
