@@ -52,6 +52,9 @@ export async function uploadMedia({
     },
     body: form,
   });
+  if (!response.ok) {
+    throw new Error(`Failed to upload media: ${response.statusText}`);
+  }
 
   const mediaData = await response.json();
   return mediaData.id;

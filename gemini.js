@@ -18,6 +18,12 @@ export async function summarizePaper(content) {
 export async function captionImage(arrayBuffer, mimeType) {
   const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' });
   const buffer = Buffer.from(arrayBuffer);
+
+  // https://github.com/google/generative-ai-android/issues/26
+  if (buffer.length > 4194302) {
+    throw new Error('Image is too large');
+  }
+
   const result = await model.generateContent([CAPTION_PROMPT_TEMPLATE, {
     inlineData: {
       data: buffer.toString('base64'),

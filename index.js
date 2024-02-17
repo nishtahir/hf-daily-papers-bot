@@ -45,17 +45,29 @@ async function handleMedia(mediaUrl) {
   if (mimeType) {
     const buffer = await downloadMedia(mediaUrl);
     let caption = null;
-    if (mimeTypeIsImage(mimeType)) {
-      caption = await captionImage(buffer, mimeType);
+    try {
+      if (mimeTypeIsImage(mimeType)) {
+        caption = await captionImage(buffer, mimeType);
+      }
+    } catch (error) {
+      // If we fail to caption the media, don't fail the entire post
+      // eslint-disable-next-line no-console
+      console.error(`Failed to caption media: ${error.message}`);
     }
-    const mediaId = await uploadMedia({ buffer, mimeType, description: caption });
-    mediaIds.push(mediaId);
+    try {
+      const mediaId = await uploadMedia({ buffer, mimeType, description: caption });
+      mediaIds.push(mediaId);
+    } catch (error) {
+      // If we fail to upload the media, don't fail the entire post
+      // eslint-disable-next-line no-console
+      console.error(`Failed to upload media: ${error.message}`);
+    }
   }
   return mediaIds;
 }
 
-async function fetchNewPapers() {
-  const items = await fetchDailyPapers();
+async function fetchNewPapers(date) {
+  const items = await fetchDailyPapers(date);
   const recentPosts = await fetchRecentPosts();
   // We only want to post papers that haven't been posted before
   // We can check this by checking to see if the paper URL appears in any of the recent posts
