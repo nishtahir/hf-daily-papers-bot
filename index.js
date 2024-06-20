@@ -14,6 +14,10 @@ async function downloadMedia(url) {
 }
 
 function parseMimeType(url) {
+  if (!url) {
+    return null;
+  }
+
   // get the file extension
   const fileExtension = url.split('.').pop();
   if (!fileExtension) {
